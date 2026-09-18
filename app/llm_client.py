@@ -10,18 +10,19 @@ from .config import (
     GROQ_FALLBACK_MODEL,
     GROQ_MODEL,
 )
+from .fallback_parser import fallback_interpret_notes
 
 logger = logging.getLogger("gridwise.llm")
 
 _client: OpenAI | None = None
 
 
-def _get_client() -> OpenAI:
+def _get_client() -> OpenAI | None:
     global _client
     if _client is None:
         key = GROQ_API_KEY
         if not key:
-            raise RuntimeError("No LLM API key configured (set GROQ_API_KEY or OPENAI_API_KEY)")
+            return None
         _client = OpenAI(api_key=key, base_url=GROQ_BASE_URL)
     return _client
 
@@ -54,11 +55,19 @@ def interpret_notes(
     battery: dict,
     validate_fn=None,
 ) -> tuple[list[dict], str]:
-    """Interpret notes via LLM. If validate_fn (deterministic guardrail) is given,
-    retry with the validation error as feedback so the model can self-correct.
+    """Interpret notes via LLM. If LLM is unconfigured or fails,
+    fallback deterministically using rules.
 
-    Returns (raw_entries, model_used). Raises RuntimeError if all attempts fail.
+    Returns (raw_entries, model_used).
     """
+    client = _get_client()
+    if client is None:
+        logger.info("No LLM API key configured; using deterministic fallback parser.")
+        entries = fallback_interpret_notes(notes, battery)
+        if validate_fn is not None:
+            validate_fn(entries)
+        return entries, "deterministic-fallback"
+
     from .llm_prompt import SYSTEM_PROMPT
 
     user_content = "\n\n".join(f"[note {i}] {n}" for i, n in enumerate(notes))
@@ -83,7 +92,7 @@ def interpret_notes(
         for attempt in range(tries):
             try:
                 start = time.perf_counter()
-                resp = _get_client().chat.completions.create(
+                resp = client.chat.completions.create(
                     model=model,
                     messages=messages,
                     temperature=0,
@@ -96,7 +105,7 @@ def interpret_notes(
                 entries = _parse(raw)
 
                 if validate_fn is not None:
-                    validate_fn(entries)  # raises ValueError with specifics
+                    validate_fn(entries)
 
                 elapsed = time.perf_counter() - start
                 logger.info(
@@ -112,7 +121,6 @@ def interpret_notes(
                 logger.warning(
                     "LLM attempt failed model=%s try=%d: %s", model, attempt + 1, exc
                 )
-                # Self-correction: show the model its output + the error
                 if attempt + 1 < tries or model == attempts[-1][0]:
                     messages = messages[:2] + [
                         {"role": "assistant", "content": raw if 'raw' in locals() and raw else ""},
@@ -122,13 +130,14 @@ def interpret_notes(
                                 "Your previous answer was rejected by the deterministic "
                                 f"validator with error: {exc}\n"
                                 "Return the corrected JSON object {\"directives\": [...]} "
-                                "following ALL conventions (note_index order, hours as "
-                                "unique ascending integers 0-23, start hour included / end "
-                                "hour excluded, factor = remaining fraction, no_op has "
-                                "applies=false and structured_adjustment=null)."
+                                "following ALL conventions."
                             ),
                         },
                     ]
                 time.sleep(0.4)
 
-    raise RuntimeError(f"LLM interpretation failed after retries: {last_err}")
+    logger.warning("All LLM attempts failed (%s); switching to deterministic fallback parser.", last_err)
+    entries = fallback_interpret_notes(notes, battery)
+    if validate_fn is not None:
+        validate_fn(entries)
+    return entries, "deterministic-fallback"
