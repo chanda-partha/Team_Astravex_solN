@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import logging
+import os
+from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from .guardrails import validate_interpretation
 from .llm_client import interpret_notes
@@ -35,9 +39,24 @@ app = FastAPI(
     version="1.0.0",
 )
 
+# CORS configuration
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+# Mount static directory if it exists
+STATIC_DIR = Path("static")
+if STATIC_DIR.exists():
+    app.mount("/static", StaticFiles(directory="static"), name="static")
+
 
 # --------------------------------------------------
-# Root endpoint
+# Root & UI endpoints
 # --------------------------------------------------
 
 @app.get("/")
@@ -47,8 +66,31 @@ def root() -> dict:
         "status": "running",
         "health": "/health",
         "docs": "/docs",
+        "ui": "/ui",
         "optimize": "/optimize-energy",
     }
+
+
+@app.get("/ui")
+def ui():
+    index_file = STATIC_DIR / "index.html"
+    if index_file.exists():
+        return FileResponse(index_file)
+    return JSONResponse(
+        status_code=404,
+        content={"error": "ui_not_found", "detail": "Frontend UI file index.html not found."},
+    )
+
+
+@app.get("/samples/BUP_CSE_FEST_2026_Preli_Public_Sample_Cases.json")
+def get_sample_cases():
+    sample_file = Path("samples/BUP_CSE_FEST_2026_Preli_Public_Sample_Cases.json")
+    if sample_file.exists():
+        return FileResponse(sample_file, media_type="application/json")
+    return JSONResponse(
+        status_code=404,
+        content={"error": "sample_cases_not_found"},
+    )
 
 
 # --------------------------------------------------
