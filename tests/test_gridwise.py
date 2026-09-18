@@ -56,10 +56,8 @@ def test_1_health_endpoint():
 def test_2_root_endpoint():
     resp = client.get("/")
     assert resp.status_code == 200
-    data = resp.json()
-    assert data["status"] == "running"
-    assert "health" in data
-    assert "optimize" in data
+    assert "text/html" in resp.headers.get("content-type", "")
+    assert "GridWise" in resp.text
 
 
 # ---------------------------------------------------------------------------

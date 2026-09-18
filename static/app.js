@@ -1,6 +1,8 @@
 // GridWise AI Operator Frontend JavaScript Application
-// Connected directly to production backend at https://gridpilot-bup.onrender.com
-const API_BASE_URL = "https://gridpilot-bup.onrender.com";
+// Configured for dynamic origin with fallback to https://gridpilot-bup.onrender.com
+const API_BASE_URL = (window.location.origin && window.location.origin !== "null")
+  ? window.location.origin
+  : "https://gridpilot-bup.onrender.com";
 
 let sampleCasesMap = {};
 let currentHours = [];

@@ -39,46 +39,40 @@ app = FastAPI(
     version="1.0.0",
 )
 
+# --------------------------------------------------
+# Path & Directory Setup
+# --------------------------------------------------
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+STATIC_DIR = BASE_DIR / "static"
+FRONTEND_DIR = BASE_DIR / "frontend"
+SAMPLES_DIR = BASE_DIR / "samples"
+
 # CORS configuration
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-
-# Mount static and frontend directories if present
-STATIC_DIR = Path("static")
-FRONTEND_DIR = Path("frontend")
-
 if STATIC_DIR.exists():
-    app.mount("/static", StaticFiles(directory="static"), name="static")
+    app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 if FRONTEND_DIR.exists():
-    app.mount("/frontend", StaticFiles(directory="frontend"), name="frontend")
+    app.mount("/frontend", StaticFiles(directory=str(FRONTEND_DIR)), name="frontend")
 
 
 # --------------------------------------------------
 # Root & UI endpoints
 # --------------------------------------------------
 
-@app.get("/")
-def root() -> dict:
-    return {
-        "name": "GridWise Energy Optimizer",
-        "status": "running",
-        "health": "/health",
-        "docs": "/docs",
-        "ui": "/ui",
-        "optimize": "/optimize-energy",
-    }
-
-
-@app.get("/ui")
-@app.get("/app")
-def ui():
-    for candidate in [FRONTEND_DIR / "index.html", STATIC_DIR / "index.html"]:
+@app.get("/", include_in_schema=False)
+@app.get("/ui", include_in_schema=False)
+@app.get("/app", include_in_schema=False)
+def serve_homepage():
+    """Serve the custom GridWise Energy Optimizer frontend homepage."""
+    for candidate in [STATIC_DIR / "index.html", FRONTEND_DIR / "index.html"]:
         if candidate.exists():
             return FileResponse(candidate)
     return JSONResponse(
@@ -87,9 +81,26 @@ def ui():
     )
 
 
+@app.get("/style.css", include_in_schema=False)
+def serve_css():
+    for candidate in [STATIC_DIR / "style.css", FRONTEND_DIR / "style.css"]:
+        if candidate.exists():
+            return FileResponse(candidate, media_type="text/css")
+    return JSONResponse(status_code=404, content={"error": "css_not_found"})
+
+
+@app.get("/app.js", include_in_schema=False)
+@app.get("/script.js", include_in_schema=False)
+def serve_js():
+    for candidate in [STATIC_DIR / "app.js", FRONTEND_DIR / "script.js", STATIC_DIR / "script.js"]:
+        if candidate.exists():
+            return FileResponse(candidate, media_type="application/javascript")
+    return JSONResponse(status_code=404, content={"error": "js_not_found"})
+
+
 @app.get("/samples/BUP_CSE_FEST_2026_Preli_Public_Sample_Cases.json")
 def get_sample_cases():
-    sample_file = Path("samples/BUP_CSE_FEST_2026_Preli_Public_Sample_Cases.json")
+    sample_file = SAMPLES_DIR / "BUP_CSE_FEST_2026_Preli_Public_Sample_Cases.json"
     if sample_file.exists():
         return FileResponse(sample_file, media_type="application/json")
     return JSONResponse(
