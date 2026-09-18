@@ -49,10 +49,14 @@ app.add_middleware(
 )
 
 
-# Mount static directory if it exists
+# Mount static and frontend directories if present
 STATIC_DIR = Path("static")
+FRONTEND_DIR = Path("frontend")
+
 if STATIC_DIR.exists():
     app.mount("/static", StaticFiles(directory="static"), name="static")
+if FRONTEND_DIR.exists():
+    app.mount("/frontend", StaticFiles(directory="frontend"), name="frontend")
 
 
 # --------------------------------------------------
@@ -72,10 +76,11 @@ def root() -> dict:
 
 
 @app.get("/ui")
+@app.get("/app")
 def ui():
-    index_file = STATIC_DIR / "index.html"
-    if index_file.exists():
-        return FileResponse(index_file)
+    for candidate in [FRONTEND_DIR / "index.html", STATIC_DIR / "index.html"]:
+        if candidate.exists():
+            return FileResponse(candidate)
     return JSONResponse(
         status_code=404,
         content={"error": "ui_not_found", "detail": "Frontend UI file index.html not found."},

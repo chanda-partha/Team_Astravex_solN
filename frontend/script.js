@@ -1,8 +1,6 @@
 // GridWise AI Operator Frontend JavaScript Application
-// Configurable API base URL (uses current origin or fallback)
-const API_BASE_URL = window.location.origin.includes("localhost") || window.location.origin.includes("127.0.0.1")
-  ? window.location.origin
-  : "https://gridpilot-bup.onrender.com";
+// Connected directly to production backend at https://gridpilot-bup.onrender.com
+const API_BASE_URL = "https://gridpilot-bup.onrender.com";
 
 let sampleCasesMap = {};
 let currentHours = [];
@@ -11,6 +9,7 @@ document.addEventListener("DOMContentLoaded", () => {
   checkBackendHealth();
   loadSampleCases();
   setupEventListeners();
+  initDefaultDemoScenario();
 });
 
 async function checkBackendHealth() {
@@ -38,11 +37,26 @@ async function loadSampleCases() {
       data.cases.forEach(c => {
         sampleCasesMap[c.id] = c;
       });
-      onSelectSample("SAMPLE-01");
     }
   } catch (err) {
-    console.log("Using default sample cases");
+    console.log("Using default demo scenario");
   }
+}
+
+function initDefaultDemoScenario() {
+  document.getElementById("operator-notes-input").value = 
+    "Solar output will drop to about 20% from 1 PM to 3 PM.\n" +
+    "Do not charge the battery between 2 PM and 4 PM.\n" +
+    "Keep at least 120 kWh in reserve from 6 PM until 9 PM.\n" +
+    "The cafeteria menu changes tomorrow.";
+
+  document.getElementById("bat-capacity").value = 220;
+  document.getElementById("bat-initial").value = 110;
+  document.getElementById("bat-minimum").value = 40;
+  document.getElementById("bat-max-ch").value = 50;
+  document.getElementById("bat-max-dis").value = 50;
+
+  currentHours = buildDefaultHours();
 }
 
 function setupEventListeners() {
@@ -61,7 +75,10 @@ function onSelectSample(sampleId) {
     return;
   }
   const caseObj = sampleCasesMap[sampleId];
-  if (!caseObj) return;
+  if (!caseObj) {
+    initDefaultDemoScenario();
+    return;
+  }
 
   const input = caseObj.input;
   
@@ -147,7 +164,7 @@ async function generatePlan() {
   };
 
   const payload = {
-    scenario_id: sampleId !== "CUSTOM" ? sampleId : "DEMO-CUSTOM",
+    scenario_id: sampleId !== "CUSTOM" ? sampleId : "DEMO-001",
     operator_notes: notes,
     hours: hoursData,
     battery: batteryData
@@ -186,10 +203,8 @@ function showError(msg) {
 }
 
 function renderResults(data, inputHours) {
-  // Raw JSON Viewer
   document.getElementById("raw-json-viewer").innerText = JSON.stringify(data, null, 2);
 
-  // 1. Update KPI Cards
   document.getElementById("kpi-grid").innerHTML = `${data.total_grid_kwh.toFixed(1)} <span class="unit">kWh</span>`;
   document.getElementById("kpi-cost").innerHTML = `৳${data.total_cost_bdt.toFixed(2)} <span class="unit">BDT</span>`;
   document.getElementById("kpi-peak").innerHTML = `${data.peak_grid_kwh.toFixed(1)} <span class="unit">kWh/h</span>`;
@@ -198,16 +213,10 @@ function renderResults(data, inputHours) {
   document.getElementById("kpi-directives").innerHTML = `${appliedCount} <span class="unit">active</span>`;
   document.getElementById("kpi-model").innerText = `Scenario: ${data.scenario_id}`;
 
-  // 2. Summary Box
   document.getElementById("summary-text").innerText = data.plan_summary || "24-hour optimal schedule generated and validated.";
 
-  // 3. Render Directive Cards
   renderDirectives(data.directive_interpretation);
-
-  // 4. Render Visual SVG Chart
   renderChart(data.hourly_plan);
-
-  // 5. Render Schedule Table
   renderTable(data.hourly_plan, inputHours);
 }
 
@@ -248,7 +257,6 @@ function renderChart(plan) {
   const padding = 30;
 
   const maxVal = Math.max(...plan.map(p => Math.max(p.grid_kwh, p.solar_used_kwh, p.battery_energy_after_kwh, 35)));
-  
   const stepX = (width - padding * 2) / 23;
 
   for (let i = 0; i <= 4; i++) {
@@ -313,8 +321,7 @@ function renderTable(plan, inputHours) {
   }
 
   plan.forEach(p => {
-    const demand = hoursMap[p.hour] ? hoursMap[p.hour].demand_kwh : 30.0;
-    const tariff = hoursMap[p.hour] ? hoursMap[p.hour].tariff_bdt_per_kwh : 5.0;
+    const demand = hoursMap[p.hour] ? hoursMap[p.hour].demand_kwh : 80.0;
     const effectiveSolar = hoursMap[p.hour] ? hoursMap[p.hour].solar_kwh : 0.0;
 
     const tr = document.createElement("tr");
