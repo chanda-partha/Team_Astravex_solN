@@ -1,0 +1,14 @@
+# Secrets
+.env
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Extracted per-case request files (do not redistribute the event pack)
+samples/case_*.json
+
+# Logs
+server.log
