@@ -19,14 +19,24 @@ _client: OpenAI | None = None
 def _get_client() -> OpenAI:
     global _client
     if _client is None:
-        if not GROQ_API_KEY:
-            raise RuntimeError("GROQ_API_KEY not configured")
-        _client = OpenAI(api_key=GROQ_API_KEY, base_url=GROQ_BASE_URL)
+        key = GROQ_API_KEY
+        if not key:
+            raise RuntimeError("No LLM API key configured (set GROQ_API_KEY or OPENAI_API_KEY)")
+        _client = OpenAI(api_key=key, base_url=GROQ_BASE_URL)
     return _client
 
 
 def _parse(raw: str) -> list[dict]:
-    data = json.loads(raw)
+    cleaned = raw.strip()
+    if cleaned.startswith("```"):
+        lines = cleaned.splitlines()
+        if lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].startswith("```"):
+            lines = lines[:-1]
+        cleaned = "\n".join(lines).strip()
+
+    data = json.loads(cleaned)
     if isinstance(data, dict):
         for key in ("directives", "results", "interpretations", "notes", "items"):
             if isinstance(data.get(key), list):
@@ -79,7 +89,6 @@ def interpret_notes(
                     temperature=0,
                     max_tokens=4000,
                     response_format={"type": "json_object"},
-                    reasoning_effort="low",
                 )
                 raw = resp.choices[0].message.content
                 if not raw or not raw.strip():
@@ -92,7 +101,10 @@ def interpret_notes(
                 elapsed = time.perf_counter() - start
                 logger.info(
                     "LLM ok model=%s attempt=%d took=%.2fs notes=%d",
-                    model, attempt + 1, elapsed, len(notes),
+                    model,
+                    attempt + 1,
+                    elapsed,
+                    len(notes),
                 )
                 return entries, model
             except Exception as exc:  # noqa: BLE001
@@ -103,7 +115,7 @@ def interpret_notes(
                 # Self-correction: show the model its output + the error
                 if attempt + 1 < tries or model == attempts[-1][0]:
                     messages = messages[:2] + [
-                        {"role": "assistant", "content": raw or ""},
+                        {"role": "assistant", "content": raw if 'raw' in locals() and raw else ""},
                         {
                             "role": "user",
                             "content": (

@@ -1,133 +1,175 @@
-# GridWise — BUP CSE Fest 2026 (Preliminary)
+# GridWise Energy Optimizer
 
-LLM-assisted smart-campus energy scheduling service for the BUP CSE Fest 2026
-online preliminary. Interprets natural-language operator notes with an LLM,
-validates them with deterministic guardrails, then produces a valid,
-minimum-cost 24-hour energy schedule via linear programming.
+**BUP CSE Fest 2026 Smart Campus Energy Optimization Challenge**  
+*LLM-Assisted Operator Directive Interpretation & 24-Hour Schedule Optimization*
 
-## Architecture
+---
 
-```
-POST /optimize-energy
-   │
-   ├─ 1. LLM (Groq, gpt-oss-120b / fallback gpt-oss-20b)
-   │       converts each operator note into a structured directive
-   │
-   ├─ 2. Deterministic guardrails (app/guardrails.py)
-   │       directive whitelist, note mapping/order, hours 0-23 unique
-   │       ascending, applies semantics, numeric ranges, shape normalization
-   │       rejected LLM output triggers a self-correction retry with feedback
-   │
-   ├─ 3. LP optimizer (app/optimizer.py, PuLP + CBC)
-   │       minimizes Σ grid[h] × tariff[h] subject to energy balance,
-   │       battery bounds/rates, end-of-day neutrality, effective solar
-   │       (after solar_reduction), reserve/no-charge/no-discharge/grid-cap
-   │
-   └─ 4. Self-replay validator (app/validator.py)
-           replays the plan; the response is only sent if every rule holds
-```
+## Overview
 
-The LLM is in the directive-interpretation path (mandatory requirement);
-deterministic code owns validation and optimization.
+GridWise Energy Optimizer is an intelligent energy management service designed for smart campus grids. It combines natural-language processing (via LLMs with strict deterministic guardrails) and Linear Programming (PuLP) to interpret operator directives and compute mathematically optimal 24-hour electricity dispatch schedules.
 
-## Environment variables
+### Key Capabilities
+1. **LLM-Assisted Directive Interpretation**: Parses natural-language operator notes into structured machine directives.
+2. **Deterministic Guardrails**: Validates and normalizes LLM outputs against strict physical and logical constraints.
+3. **Linear Programming Optimization**: Minimizes total grid electricity cost over 24 hours while prioritizing grid constraints and feasibility.
+4. **Independent Replay Validator**: Runs an 18-rule verification pass on every schedule before responding to guarantee correctness.
 
-| Variable | Required | Default | Purpose |
-|---|---|---|---|
-| `GROQ_API_KEY` | yes | — | Groq API key (never commit; provide at runtime) |
-| `GROQ_MODEL` | no | `openai/gpt-oss-120b` | Primary interpretation model |
-| `GROQ_FALLBACK_MODEL` | no | `openai/gpt-oss-20b` | Fallback model |
-| `GROQ_BASE_URL` | no | `https://api.groq.com/openai/v1` | OpenAI-compatible endpoint |
-| `PORT` | no | `8000` | HTTP port (Docker) |
+---
 
-Copy `.env.example` to `.env` and fill in `GROQ_API_KEY`. The `.env` file is
-gitignored and must never be committed or baked into the Docker image.
+## Supported Directives
 
-## Local quickstart
+The service interprets up to 3 natural-language operator notes into exactly one of six supported directive types per note:
+
+| Directive Type | Description | Constraint Applied |
+| :--- | :--- | :--- |
+| `solar_reduction` | Usable solar generation reduced for specific hours | `effective_solar[h] = original_solar[h] * factor` |
+| `minimum_battery_reserve` | Required minimum energy reserve for specific hours | `battery_energy_after_kwh[h] >= max(base, directive)` |
+| `no_charge_window` | Battery charging disabled for specific hours | `battery_charge[h] == 0` |
+| `no_discharge_window` | Battery discharging disabled for specific hours | `battery_discharge[h] == 0` |
+| `max_grid_window` | Maximum grid import cap for specific hours | `grid_kwh[h] <= max_grid_kwh` |
+| `no_op` | Irrelevant note (cafeteria, library, registration, etc.) | No change to optimization model |
+
+---
+
+## Local Setup & Environment Variables
+
+### 1. Prerequisites
+- Python 3.10+ (or Python 3.12/3.14 via `uv`)
+
+### 2. Environment Variables
+Copy `.env.example` to `.env`:
 
 ```bash
-python -m venv .venv
-.venv\Scripts\activate            # Windows (Linux/macOS: source .venv/bin/activate)
-pip install -r requirements.txt
-copy .env.example .env            # then edit .env: GROQ_API_KEY=...
-python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+GROQ_API_KEY=your_groq_or_openai_api_key_here
+GROQ_MODEL=llama-3.1-8b-instant
+GROQ_FALLBACK_MODEL=llama-3.3-70b-versatile
+GROQ_BASE_URL=https://api.groq.com/openai/v1
 ```
 
-## Health check
+*Note: The LLM client automatically falls back to `OPENAI_API_KEY` or `LLM_API_KEY` if `GROQ_API_KEY` is not set.*
+
+### 3. Installation
 
 ```bash
-curl http://localhost:8000/health
-# {"status":"ok"}
+uv venv .venv
+uv pip install -r requirements.txt pytest httpx
 ```
 
-## Optimize request
+---
+
+## Running the Service Locally
+
+Start the server using Uvicorn:
 
 ```bash
-curl -X POST http://localhost:8000/optimize-energy \
-  -H "Content-Type: application/json" \
-  -d @samples/case_01.json
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-Sample response (abridged):
+---
+
+## API Endpoints
+
+| Method | Endpoint | Description |
+| :--- | :--- | :--- |
+| `GET` | `/` | Service info and endpoint links |
+| `GET` | `/health` | Health check endpoint (`{"status": "ok"}`) |
+| `GET` | `/docs` | OpenAPI / Swagger interactive documentation |
+| `POST` | `/optimize-energy` | Main optimization endpoint |
+
+---
+
+## Example Request & Response
+
+### Request (`POST /optimize-energy`)
+
+```json
+{
+  "scenario_id": "SAMPLE-01",
+  "operator_notes": [
+    "Facilities will wash the rooftop solar panels from noon until 2 PM. Usable solar should be treated as roughly 25% of forecast.",
+    "The sports office moved registration deadline."
+  ],
+  "hours": [
+    { "hour": 0, "demand_kwh": 25.0, "solar_kwh": 0.0, "tariff_bdt_per_kwh": 5.0 },
+    "... (24 hours total for hours 0..23)"
+  ],
+  "battery": {
+    "capacity_kwh": 100.0,
+    "initial_energy_kwh": 50.0,
+    "minimum_energy_kwh": 10.0,
+    "max_charge_kwh_per_hour": 25.0,
+    "max_discharge_kwh_per_hour": 25.0
+  }
+}
+```
+
+### Response (`HTTP 200`)
 
 ```json
 {
   "scenario_id": "SAMPLE-01",
   "directive_interpretation": [
-    {"note_index": 0, "applies": true, "directive_type": "solar_reduction",
-     "structured_adjustment": {"hours": [12, 13], "factor": 0.25},
-     "explanation": "Solar availability reduced to 25% during panel cleaning."},
-    {"note_index": 1, "applies": false, "directive_type": "no_op",
-     "structured_adjustment": null, "explanation": "..."}
+    {
+      "note_index": 0,
+      "applies": true,
+      "directive_type": "solar_reduction",
+      "structured_adjustment": {
+        "hours": [12, 13],
+        "factor": 0.25
+      },
+      "explanation": "Solar availability is reduced to 25% during the panel-cleaning window."
+    },
+    {
+      "note_index": 1,
+      "applies": false,
+      "directive_type": "no_op",
+      "structured_adjustment": null,
+      "explanation": "This note does not affect today's 24-hour energy schedule."
+    }
   ],
   "hourly_plan": [
-    {"hour": 0, "grid_kwh": 90, "solar_used_kwh": 0, "battery_action": "idle",
-     "battery_kwh": 0, "battery_energy_after_kwh": 110}
+    {
+      "hour": 0,
+      "grid_kwh": 25.0,
+      "solar_used_kwh": 0.0,
+      "battery_action": "idle",
+      "battery_kwh": 0.0,
+      "battery_energy_after_kwh": 50.0
+    }
   ],
-  "total_grid_kwh": 2692.5,
-  "total_cost_bdt": 38365.0,
-  "peak_grid_kwh": 175.0,
-  "plan_summary": "..."
+  "total_grid_kwh": 580.0,
+  "total_cost_bdt": 4200.0,
+  "peak_grid_kwh": 35.0,
+  "plan_summary": "Schedule applies solar_reduction. Total grid purchase 580.0 kWh."
 }
 ```
 
-## Run the public sample pack
+---
+
+## Automated Testing
+
+Run the full automated test suite:
 
 ```bash
-python scripts/test_samples.py --url http://localhost:8000
-# health: 200 {"status":"ok"}
-# SAMPLE-01 ... VALID cost=38365.0 ref=38365.0 ratio=1.000
-# ...
-# 10/10 cases valid
+pytest -v
 ```
 
-The script replays each returned plan independently (energy balance, battery
-rules, directives, end-of-day neutrality) and compares the recalculated cost
-against the organizer reference.
+This executes:
+- `tests/test_gridwise.py`: Tests all 14 required core scenarios and edge cases.
+- `tests/test_public_samples.py`: Tests all 10 official public sample cases.
 
-## Docker
+---
 
-```bash
-docker build -t gridwise:latest .
-docker run --rm -p 8000:8000 -e GROQ_API_KEY=your_key gridwise:latest
-curl http://localhost:8000/health
-```
+## Render Deployment Instructions
 
-The image binds `0.0.0.0`, exposes port `8000`, and contains no secrets.
+To deploy on [Render](https://render.com/):
 
-## API behavior
-
-- `GET /health` → `200 {"status":"ok"}`
-- `POST /optimize-energy` → `200` with interpretation + plan
-- Malformed JSON / structurally invalid request → `400`
-- Infeasible under interpreted directives → `422`
-- Controlled internal error → `500` (no stack traces, no secrets)
-
-## Known limitations
-
-- Cost optimality depends on the CBC solver; equivalent alternative optimal
-  schedules may differ from the judge reference while scoring identically.
-- Reserve/percentage conversions use only the battery capacity supplied in
-  the request; no other request values are modified.
-- LLM interpretation depends on Groq availability; retries, a fallback model,
-  and deterministic guardrails bound the failure modes.
+1. **New Web Service**: Connect your repository on Render.
+2. **Environment**: Python 3.12+ / Docker.
+3. **Build Command**: `pip install -r requirements.txt`
+4. **Start Command**:
+   ```bash
+   uvicorn app.main:app --host 0.0.0.0 --port $PORT
+   ```
+5. **Environment Variables**: Add `GROQ_API_KEY` (or `OPENAI_API_KEY`) in Render dashboard settings.

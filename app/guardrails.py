@@ -48,7 +48,9 @@ def _normalize_hours(raw) -> list[int] | None:
     return hours
 
 
-def validate_interpretation(raw_list: list[dict], n_notes: int) -> list[DirectiveInterpretation]:
+def validate_interpretation(
+    raw_list: list[dict], n_notes: int, battery: dict | None = None
+) -> list[DirectiveInterpretation]:
     """Turn untrusted LLM JSON into valid DirectiveInterpretation entries.
 
     Raises ValueError if any entry is unusable (caller may retry / fail safely).
@@ -59,7 +61,6 @@ def validate_interpretation(raw_list: list[dict], n_notes: int) -> list[Directiv
         raise ValueError(f"expected {n_notes} entries, got {len(raw_list)}")
 
     validated: list[DirectiveInterpretation] = []
-    seen_idx = set()
     for i, raw in enumerate(raw_list):
         if not isinstance(raw, dict):
             raise ValueError(f"entry {i} is not an object")
@@ -69,7 +70,7 @@ def validate_interpretation(raw_list: list[dict], n_notes: int) -> list[Directiv
             raise ValueError(f"entry {i}: bad note_index")
         idx = int(idx)
         if idx != i:
-            raise ValueError(f"entry {i}: note_index {idx} out of order/duplicate")
+            raise ValueError(f"entry {i}: note_index {idx} out of order/duplicate (expected {i})")
 
         dtype = raw.get("directive_type")
         if dtype not in ALLOWED_TYPES:
@@ -77,6 +78,8 @@ def validate_interpretation(raw_list: list[dict], n_notes: int) -> list[Directiv
 
         applies = raw.get("applies")
         if dtype == "no_op":
+            if applies is True:
+                raise ValueError(f"entry {i}: no_op directive must have applies=false")
             validated.append(
                 DirectiveInterpretation(
                     note_index=idx,
@@ -117,6 +120,14 @@ def validate_interpretation(raw_list: list[dict], n_notes: int) -> list[Directiv
             adjustment = model.model_validate(adj_raw)
         except Exception as exc:
             raise ValueError(f"entry {i}: adjustment validation failed: {exc}") from exc
+
+        if dtype == "minimum_battery_reserve" and battery is not None:
+            cap = float(battery.get("capacity_kwh", float("inf")))
+            if adjustment.minimum_energy_kwh > cap + 1e-6:
+                raise ValueError(
+                    f"entry {i}: minimum_energy_kwh ({adjustment.minimum_energy_kwh}) "
+                    f"exceeds battery capacity ({cap})"
+                )
 
         validated.append(
             DirectiveInterpretation(

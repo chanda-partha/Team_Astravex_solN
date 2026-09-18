@@ -15,8 +15,13 @@ def validate_plan(
     hours_data: list[dict],
     battery: dict,
     directives: list[DirectiveInterpretation],
+    metrics: dict | None = None,
 ) -> tuple[bool, list[str]]:
     errors: list[str] = []
+
+    if len(plan) != 24:
+        errors.append(f"plan must contain exactly 24 entries, got {len(plan)}")
+        return False, errors
 
     cap = float(battery["capacity_kwh"])
     e0 = float(battery["initial_energy_kwh"])
@@ -46,12 +51,25 @@ def validate_plan(
     effective_solar = compute_effective_solar(hours_data, directives)
 
     prev_e = e0
-    for entry in plan:
+    seen_hours = set()
+    calc_total_grid = 0.0
+    calc_total_cost = 0.0
+    calc_peak_grid = 0.0
+
+    for idx, entry in enumerate(plan):
         h = entry["hour"]
         if not (0 <= h <= 23):
             errors.append(f"hour {h}: out of range")
             continue
+        if h in seen_hours:
+            errors.append(f"hour {h}: duplicate hour entry")
+        seen_hours.add(h)
+
+        if h != idx:
+            errors.append(f"hour entry at index {idx} has hour {h} (must be strictly 0..23 in order)")
+
         demand = float(hours_data[h]["demand_kwh"])
+        tariff = float(hours_data[h]["tariff_bdt_per_kwh"])
         g = entry["grid_kwh"]
         s = entry["solar_used_kwh"]
         action = entry["battery_action"]
@@ -63,8 +81,8 @@ def validate_plan(
             continue
         if g < -TOL or s < -TOL or mag < -TOL:
             errors.append(f"hour {h}: negative value")
-        if action == "idle" and mag > TOL:
-            errors.append(f"hour {h}: idle with nonzero battery_kwh")
+        if action == "idle" and mag > 1e-6:
+            errors.append(f"hour {h}: idle with nonzero battery_kwh ({mag})")
 
         # Solar limit
         if s > effective_solar[h] + TOL:
@@ -95,10 +113,32 @@ def validate_plan(
         if abs(supplied - required) > TOL:
             errors.append(f"hour {h}: energy balance off by {supplied - required}")
 
+        calc_total_grid += g
+        calc_total_cost += g * tariff
+        if g > calc_peak_grid:
+            calc_peak_grid = g
+
         prev_e = e_after
+
+    if len(seen_hours) != 24:
+        errors.append("plan does not contain all 24 hours 0..23")
 
     # Final neutrality
     if abs(prev_e - e0) > TOL:
         errors.append(f"end-of-day battery {prev_e} != initial {e0}")
+
+    if metrics is not None:
+        if abs(calc_total_grid - metrics.get("total_grid_kwh", calc_total_grid)) > TOL:
+            errors.append(
+                f"total_grid_kwh mismatch: calculated {calc_total_grid:.4f} != response {metrics.get('total_grid_kwh')}"
+            )
+        if abs(calc_total_cost - metrics.get("total_cost_bdt", calc_total_cost)) > TOL:
+            errors.append(
+                f"total_cost_bdt mismatch: calculated {calc_total_cost:.4f} != response {metrics.get('total_cost_bdt')}"
+            )
+        if abs(calc_peak_grid - metrics.get("peak_grid_kwh", calc_peak_grid)) > TOL:
+            errors.append(
+                f"peak_grid_kwh mismatch: calculated {calc_peak_grid:.4f} != response {metrics.get('peak_grid_kwh')}"
+            )
 
     return (len(errors) == 0), errors

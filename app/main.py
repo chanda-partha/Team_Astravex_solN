@@ -14,7 +14,6 @@ from .optimizer import solve
 from .schemas import OptimizeRequest
 from .validator import validate_plan
 
-
 # --------------------------------------------------
 # Logging
 # --------------------------------------------------
@@ -136,6 +135,7 @@ async def optimize_energy(request: OptimizeRequest) -> JSONResponse:
                 validate_interpretation(
                     interpretation,
                     len(notes),
+                    battery=battery,
                 )
             ),
         )
@@ -146,6 +146,7 @@ async def optimize_energy(request: OptimizeRequest) -> JSONResponse:
         directives = validate_interpretation(
             raw,
             len(notes),
+            battery=battery,
         )
 
         # 3. Optimize under interpreted directives.
@@ -171,12 +172,45 @@ async def optimize_energy(request: OptimizeRequest) -> JSONResponse:
                 },
             )
 
-        # 4. Self-replay validation before responding.
+        # 4. Calculate final metrics.
+        total_grid = round(
+            sum(
+                item["grid_kwh"]
+                for item in plan
+            ),
+            4,
+        )
+
+        total_cost = round(
+            sum(
+                item["grid_kwh"]
+                * hours_data[index]["tariff_bdt_per_kwh"]
+                for index, item in enumerate(plan)
+            ),
+            4,
+        )
+
+        peak_grid = round(
+            max(
+                item["grid_kwh"]
+                for item in plan
+            ),
+            4,
+        )
+
+        metrics = {
+            "total_grid_kwh": total_grid,
+            "total_cost_bdt": total_cost,
+            "peak_grid_kwh": peak_grid,
+        }
+
+        # 5. Self-replay validation before responding.
         is_valid, errors = validate_plan(
             plan,
             hours_data,
             battery,
             directives,
+            metrics=metrics,
         )
 
         if not is_valid:
@@ -193,23 +227,6 @@ async def optimize_energy(request: OptimizeRequest) -> JSONResponse:
                 },
             )
 
-        # 5. Calculate final metrics.
-        total_grid = sum(
-            item["grid_kwh"]
-            for item in plan
-        )
-
-        total_cost = sum(
-            item["grid_kwh"]
-            * hours_data[index]["tariff_bdt_per_kwh"]
-            for index, item in enumerate(plan)
-        )
-
-        peak_grid = max(
-            item["grid_kwh"]
-            for item in plan
-        )
-
         # 6. Return the final response.
         return JSONResponse(
             status_code=200,
@@ -220,9 +237,9 @@ async def optimize_energy(request: OptimizeRequest) -> JSONResponse:
                     for directive in directives
                 ],
                 "hourly_plan": plan,
-                "total_grid_kwh": round(total_grid, 4),
-                "total_cost_bdt": round(total_cost, 4),
-                "peak_grid_kwh": round(peak_grid, 4),
+                "total_grid_kwh": total_grid,
+                "total_cost_bdt": total_cost,
+                "peak_grid_kwh": peak_grid,
                 "plan_summary": _build_plan_summary(
                     plan,
                     directives,
@@ -230,6 +247,15 @@ async def optimize_energy(request: OptimizeRequest) -> JSONResponse:
             },
         )
 
+    except (RuntimeError, ValueError) as exc:
+        logger.warning("LLM or directive error: %s", exc)
+        return JSONResponse(
+            status_code=500 if "API key" in str(exc) or "RuntimeError" in exc.__class__.__name__ else 422,
+            content={
+                "error": "llm_interpretation_failed",
+                "detail": "Controlled failure during directive interpretation.",
+            },
+        )
     except Exception as exc:
         logger.exception(
             "Optimization request failed: %s",
