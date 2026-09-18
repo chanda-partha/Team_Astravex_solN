@@ -65,7 +65,7 @@ class HourInput(BaseModel):
 
 class OptimizeRequest(BaseModel):
     scenario_id: str = Field(min_length=1)
-    operator_notes: list[str] = Field(min_length=1, max_length=3)
+    operator_notes: list[str] = Field(min_length=1, max_length=10)
     hours: list[HourInput] = Field(min_length=24, max_length=24)
     battery: BatterySpec
 

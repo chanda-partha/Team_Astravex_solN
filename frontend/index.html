@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GridWise AI — Campus Energy Assistant</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Header -->
+    <header class="navbar">
+      <div class="brand">
+        <div class="logo-icon">⚡</div>
+        <div>
+          <h1>GridWise AI Energy Assistant</h1>
+          <p class="subtitle">AI-Powered Campus Energy Optimization & Operator Control</p>
+        </div>
+      </div>
+      <div class="header-status">
+        <span class="status-badge" id="api-status-badge">
+          <span class="dot"></span> Checking backend...
+        </span>
+        <a href="/docs" target="_blank" class="docs-link">API Docs ↗</a>
+      </div>
+    </header>
+
+    <!-- Main Content Grid -->
+    <main class="dashboard-grid">
+      <!-- Left Column: Controls & Input -->
+      <section class="panel control-panel">
+        <div class="panel-header">
+          <h2>1. Operator Control Center</h2>
+          <span class="badge">LLM & Rule Engine</span>
+        </div>
+
+        <!-- Scenario Selector -->
+        <div class="form-group">
+          <label for="sample-selector">Demo Scenario Selector:</label>
+          <select id="sample-selector" class="select-input">
+            <option value="SAMPLE-01" selected>Demo Scenario 1: Solar Cleaning + Distractor</option>
+            <option value="SAMPLE-02">Demo Scenario 2: Charger Outage</option>
+            <option value="SAMPLE-03">Demo Scenario 3: Emergency Reserve 50%</option>
+            <option value="SAMPLE-04">Demo Scenario 4: No-Discharge Protection</option>
+            <option value="SAMPLE-05">Demo Scenario 5: Feeder Grid Cap 155 kWh</option>
+            <option value="SAMPLE-06">Demo Scenario 6: Multiple Notes + Library Distractor</option>
+            <option value="SAMPLE-07">Demo Scenario 7: Reserve + Transformer Cap</option>
+            <option value="SAMPLE-08">Demo Scenario 8: Separate Outages</option>
+            <option value="SAMPLE-09">Demo Scenario 9: 80% Reduction Normalization</option>
+            <option value="SAMPLE-10">Demo Scenario 10: Multi-Constraint Operation</option>
+            <option value="CUSTOM">Custom Scenario</option>
+          </select>
+        </div>
+
+        <!-- Natural-Language Directives Textarea -->
+        <div class="form-group">
+          <label for="operator-notes-input">Natural-Language Operator Directives:</label>
+          <textarea id="operator-notes-input" class="textarea-input" rows="5" placeholder="Describe your energy instruction in natural language...
+Example:
+Solar output will drop to about 20% from 1 PM to 3 PM.
+Do not charge the battery between 2 PM and 4 PM.
+Keep at least 120 kWh in reserve from 6 PM until 9 PM."></textarea>
+          
+          <div class="quick-chips">
+            <span class="chip-label">Quick Commands:</span>
+            <button type="button" class="chip-btn" onclick="insertTemplate('solar')">Solar 20% (1-3 PM)</button>
+            <button type="button" class="chip-btn" onclick="insertTemplate('nocharge')">No Charge (2-4 PM)</button>
+            <button type="button" class="chip-btn" onclick="insertTemplate('reserve')">Reserve 120 kWh (6-9 PM)</button>
+            <button type="button" class="chip-btn" onclick="insertTemplate('noop')">Cafeteria Menu (No-op)</button>
+            <button type="button" class="chip-btn btn-clear" onclick="clearNotes()">Clear</button>
+          </div>
+        </div>
+
+        <!-- Battery Storage Specifications -->
+        <div class="panel-section">
+          <h3>Battery Storage Specification</h3>
+          <div class="grid-2col">
+            <div class="form-group">
+              <label for="bat-capacity">Capacity (kWh)</label>
+              <input type="number" id="bat-capacity" value="220" step="10" min="10">
+            </div>
+            <div class="form-group">
+              <label for="bat-initial">Initial Energy (kWh)</label>
+              <input type="number" id="bat-initial" value="110" step="5" min="0">
+            </div>
+            <div class="form-group">
+              <label for="bat-minimum">Minimum Reserve (kWh)</label>
+              <input type="number" id="bat-minimum" value="40" step="5" min="0">
+            </div>
+            <div class="form-group">
+              <label for="bat-max-ch">Max Charge (kWh/h)</label>
+              <input type="number" id="bat-max-ch" value="50" step="5" min="0">
+            </div>
+            <div class="form-group">
+              <label for="bat-max-dis">Max Discharge (kWh/h)</label>
+              <input type="number" id="bat-max-dis" value="50" step="5" min="0">
+            </div>
+          </div>
+        </div>
+
+        <!-- Action Button -->
+        <button id="btn-optimize" class="btn-primary">
+          <span class="btn-icon">⚡</span>
+          <span class="btn-text">Generate Energy Plan</span>
+          <span class="spinner hidden" id="opt-spinner"></span>
+        </button>
+      </section>
+
+      <!-- Right Column: Results & Analytics -->
+      <section class="panel results-panel">
+        <div class="panel-header">
+          <h2>2. Optimization Summary & AI Directives</h2>
+          <span class="badge badge-success" id="validation-badge">18/18 Rules Validated</span>
+        </div>
+
+        <!-- Notification Banner -->
+        <div id="error-banner" class="banner banner-error hidden"></div>
+
+        <!-- Summary KPI Cards -->
+        <div class="kpi-grid">
+          <div class="kpi-card">
+            <div class="kpi-title">Total Grid Usage</div>
+            <div class="kpi-value" id="kpi-grid">0.0 <span class="unit">kWh</span></div>
+            <div class="kpi-sub">24-hour total import</div>
+          </div>
+          <div class="kpi-card highlight">
+            <div class="kpi-title">Total Cost</div>
+            <div class="kpi-value" id="kpi-cost">৳0.00 <span class="unit">BDT</span></div>
+            <div class="kpi-sub">Minimized tariff expense</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-title">Peak Grid Usage</div>
+            <div class="kpi-value" id="kpi-peak">0.0 <span class="unit">kWh/h</span></div>
+            <div class="kpi-sub">Max hourly grid draw</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-title">Applied Directives</div>
+            <div class="kpi-value" id="kpi-directives">0 <span class="unit">active</span></div>
+            <div class="kpi-sub" id="kpi-model">Model: Ready</div>
+          </div>
+        </div>
+
+        <!-- Factual Summary Box -->
+        <div class="summary-box">
+          <div class="summary-title">Plan Summary</div>
+          <div class="summary-text" id="summary-text">Click "Generate Energy Plan" to process notes and solve the optimal energy dispatch.</div>
+        </div>
+
+        <!-- Directive Interpretation Section -->
+        <div class="directives-section">
+          <h3>AI Directive Interpretation</h3>
+          <div class="directives-grid" id="directives-container">
+            <div class="placeholder-text">Interpreted directives will be displayed here.</div>
+          </div>
+        </div>
+
+        <!-- Visual Profile SVG Chart -->
+        <div class="chart-section">
+          <div class="chart-header">
+            <h3>24-Hour Energy Dispatch Profile</h3>
+            <div class="legend">
+              <span class="legend-item"><span class="swatch demand"></span> Demand</span>
+              <span class="legend-item"><span class="swatch grid"></span> Grid Usage</span>
+              <span class="legend-item"><span class="swatch solar"></span> Solar Used</span>
+              <span class="legend-item"><span class="swatch battery"></span> Battery Energy</span>
+            </div>
+          </div>
+          <div class="chart-container">
+            <svg id="schedule-chart" viewBox="0 0 800 240" preserveAspectRatio="none"></svg>
+          </div>
+        </div>
+
+        <!-- 24-Hour Schedule Data Table -->
+        <div class="table-section">
+          <h3>24-Hour Energy Schedule</h3>
+          <div class="table-wrapper">
+            <table class="schedule-table">
+              <thead>
+                <tr>
+                  <th>Hour</th>
+                  <th>Demand</th>
+                  <th>Effective Solar</th>
+                  <th>Solar Used</th>
+                  <th>Grid Usage</th>
+                  <th>Battery Action</th>
+                  <th>Battery kWh</th>
+                  <th>Battery Energy</th>
+                </tr>
+              </thead>
+              <tbody id="schedule-tbody">
+                <tr>
+                  <td colspan="8" class="text-center">No schedule generated yet.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Collapsible Raw JSON Response -->
+        <div class="json-section">
+          <details>
+            <summary class="json-summary">View Raw API Response (JSON)</summary>
+            <pre id="raw-json-viewer" class="json-viewer">// Raw API response JSON will appear here...</pre>
+          </details>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
